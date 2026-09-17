@@ -1,0 +1,163 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+      'Helvetica Neue', Arial, sans-serif;
+  }
+  body {
+    @apply bg-bg-page text-text-primary antialiased;
+  }
+}
+
+@layer components {
+  /* Reusable label style: uppercase, tracked, 11-12px, gray */
+  .label-caps {
+    @apply text-[11px] font-semibold uppercase tracking-wider text-gray-500;
+  }
+}
+
+/* ------------------------- BedTimeline (vis-timeline) ------------------------- */
+
+.mv-timeline .vis-timeline {
+  border: none;
+  font-family: inherit;
+}
+
+/* Sticky first column: room header rows + bed sub-rows */
+.mv-timeline .vis-labelset .vis-label.mv-room-group {
+  color: #111827;
+}
+.mv-timeline .vis-labelset .vis-label.mv-bed-group {
+  color: #6b7280;
+  font-size: 12px;
+}
+.mv-room-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: #111827;
+}
+.mv-room-type {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #9ca3af;
+}
+
+/* Two-line date header; today's label highlighted blue-600 */
+.mv-day-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 1px 6px;
+  line-height: 1.25;
+  border-radius: 6px 6px 0 0;
+}
+.mv-day-dow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #9ca3af;
+}
+.mv-day-num {
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+}
+.mv-day-label.mv-day-today {
+  background-color: #2563eb; /* blue-600 */
+}
+.mv-day-label.mv-day-today .mv-day-dow {
+  color: #dbeafe; /* blue-100 */
+}
+.mv-day-label.mv-day-today .mv-day-num {
+  color: #ffffff;
+}
+
+/* Today's column highlight across all rows */
+.mv-timeline .vis-item.mv-today {
+  background-color: rgba(37, 99, 235, 0.08);
+}
+
+/* Maintenance blocks — matches BlockedCell (gray + diagonal hatch) */
+.mv-timeline .vis-item.mv-blocked {
+  background-color: #d1d5db;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(156, 163, 175, 0.55) 0px,
+    rgba(156, 163, 175, 0.55) 4px,
+    transparent 4px,
+    transparent 9px
+  );
+}
+.mv-blocked-cell {
+  display: flex;
+  height: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+}
+
+/* Booking pills — matches BookingPill */
+.mv-timeline .vis-item.mv-booking {
+  background-color: transparent;
+  border-color: transparent;
+  padding: 0;
+  z-index: 2;
+}
+.mv-timeline .vis-item.mv-booking .vis-item-content {
+  padding: 0;
+  width: 100%;
+}
+.mv-pill {
+  display: flex;
+  height: 26px;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.mv-badge {
+  display: inline-flex;
+  height: 20px;
+  width: 20px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: #ffffff;
+}
+.mv-pill-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Subtle row separators */
+.mv-timeline .vis-labelset .vis-label,
+.mv-timeline .vis-foreground .vis-group {
+  border-color: #e5e7eb;
+}
+.mv-timeline .vis-panel.vis-left,
+.mv-timeline .vis-panel.vis-center,
+.mv-timeline .vis-panel.vis-top {
+  border-color: #e5e7eb;
+}
+.mv-timeline .vis-time-axis .vis-grid.vis-minor {
+  border-color: #f3f4f6;
+}
