@@ -2,6 +2,11 @@ import { useState } from 'react'
 import { BrowserRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { CalendarDays, BedDouble, MessageCircle } from 'lucide-react'
 import { BedTimeline } from './components/BedTimeline'
+import { GroupBookingForm } from './components/GroupBookingForm'
+import { KioskFlow } from './components/kiosk/KioskFlow'
+import { Housekeeping } from './components/Housekeeping'
+import { FolioView } from './components/FolioView'
+import { AdminDashboard } from './components/AdminDashboard'
 import { TopNav } from './components/ui/TopNav'
 import { PageHeader } from './components/ui/PageHeader'
 import { StatCard } from './components/ui/StatCard'
@@ -241,6 +246,12 @@ export default function App() {
       <Routes>
         <Route path="/" element={<BedTimeline />} />
         <Route path="/demo" element={<DemoPage />} />
+        <Route path="/new-booking" element={<GroupBookingForm />} />
+        <Route path="/kiosk" element={<KioskFlow />} />
+        <Route path="/housekeeping" element={<Housekeeping />} />
+        <Route path="/folios" element={<FolioView />} />
+        <Route path="/folios/:id" element={<FolioView />} />
+        <Route path="/admin" element={<AdminDashboard />} />
       </Routes>
     </BrowserRouter>
   )

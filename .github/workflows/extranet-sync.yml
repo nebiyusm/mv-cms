@@ -1,0 +1,54 @@
+# Scheduled OTA extranet sync (Booking.com).
+#
+# Required GitHub Actions secrets (Settings → Secrets and variables → Actions):
+#   SCRAPER_COOKIE_KEY   — 64-char hex AES-256-GCM key (same value as scraper/.env)
+#   COOKIES_BOOKING_ENC  — full contents of scraper/cookies.booking.enc
+#   TELEGRAM_BOT_TOKEN   — Telegram Bot API token for failure alerts
+#   TELEGRAM_CHAT_ID     — Telegram chat id that receives the alerts
+#
+# Exit codes: 0 = synced, 2 = detection (session_expired / captcha_detected /
+# 2fa_challenge / blocked / parse_failure — alert already sent), 3 = the
+# Telegram alert itself failed. Non-zero exits fail the workflow on purpose.
+
+name: extranet-sync
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Restore encrypted session cookies
+        run: echo "$COOKIES_BOOKING_ENC" > scraper/cookies.booking.enc
+        env:
+          COOKIES_BOOKING_ENC: ${{ secrets.COOKIES_BOOKING_ENC }}
+
+      - name: Run extranet sync
+        run: npm run scraper:sync
+        env:
+          SCRAPER_COOKIE_KEY: ${{ secrets.SCRAPER_COOKIE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Upload extracted bookings
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extranet-bookings
+          path: artifacts/extranet-bookings.json
+          retention-days: 30

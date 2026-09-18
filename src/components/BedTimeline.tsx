@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { CalendarDays } from 'lucide-react'
 import { DataSet } from 'vis-data/standalone'
 import { Timeline } from 'vis-timeline/standalone'
-import type { DataGroup, DataItem, TimelineOptions } from 'vis-timeline'
+import type { DataGroup, DataItem, TimelineItem, TimelineOptions } from 'vis-timeline'
 import 'vis-timeline/styles/vis-timeline-graph2d.min.css'
 import { supabase } from '../lib/supabase'
 import { SOURCE_COLORS, type Platform } from '../lib/sourceColors'
 import { TopNav } from './ui/TopNav'
 import { PageHeader } from './ui/PageHeader'
+import { ActionButton } from './ui/ActionButton'
 
 /* ------------------------------- row types ------------------------------- */
 
@@ -59,6 +60,14 @@ interface BookingItemData extends DataItem {
   guestName: string
   platform: Platform
   sourceLabel: string
+}
+
+/** Parsed, active booking placement — the client-side overlap source of truth. */
+interface BookingPlacement {
+  id: string
+  bedId: string
+  start: Date
+  end: Date
 }
 
 /* ------------------------------ data mapping ----------------------------- */
@@ -148,6 +157,28 @@ async function fetchBookingBeds(bedIds: string[]): Promise<BookingBedRow[]> {
   return (data ?? []) as unknown as BookingBedRow[]
 }
 
+function formatDate(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}
+
+/** Persist a drag-and-drop reassignment. Returns an error message on failure. */
+async function persistMove(
+  bookingBedId: string,
+  bedId: string,
+  start: Date,
+  end: Date,
+): Promise<string | null> {
+  const stay = `[${formatDate(start)},${formatDate(end)})`
+  const { error } = await supabase
+    .from('booking_beds')
+    .update({ bed_id: bedId, stay })
+    .eq('id', bookingBedId)
+  return error ? error.message : null
+}
+
 /**
  * Blocked ranges for the timeline.
  *
@@ -190,6 +221,9 @@ function blockedHtml(reason: string): string {
 
 const NAV_LINKS = [
   { label: 'Calendar', path: '/' },
+  { label: 'Housekeeping', path: '/housekeeping' },
+  { label: 'Folios', path: '/folios' },
+  { label: 'Reports', path: '/admin' },
   { label: 'Component Demo', path: '/demo' },
 ]
 
@@ -203,6 +237,18 @@ export function BedTimeline() {
   const [currency, setCurrency] = useState('USD')
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [errorMessage, setErrorMessage] = useState('')
+  const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Latest fetched data, consulted by the drag-and-drop move handler.
+  const bedsRef = useRef<BedRow[]>([])
+  const placementsRef = useRef<BookingPlacement[]>([])
+
+  const showNotice = useCallback((message: string) => {
+    setNotice(message)
+    if (noticeTimer.current) clearTimeout(noticeTimer.current)
+    noticeTimer.current = setTimeout(() => setNotice(null), 4000)
+  }, [])
 
   const now = new Date()
   const windowStart = startOfDay(addDays(now, -3))
@@ -223,6 +269,7 @@ export function BedTimeline() {
         fetchBookingBeds(bedIds),
         fetchBlocks(beds, windowStart, windowEnd),
       ])
+      bedsRef.current = beds
 
       // --- groups: room header rows with nested lettered bed sub-rows ---
       const groups: DataGroup[] = []
@@ -272,9 +319,11 @@ export function BedTimeline() {
         })
       }
 
+      const placements: BookingPlacement[] = []
       for (const bb of bookingBeds) {
         const range = parseStay(bb.stay)
         if (!range || !bb.bookings) continue
+        placements.push({ id: bb.id, bedId: bb.bed_id, start: range.start, end: range.end })
         const platform = toPlatform(bb.bookings.source)
         items.push({
           id: bb.id,
@@ -289,6 +338,7 @@ export function BedTimeline() {
           sourceLabel: SOURCE_COLORS[platform].label,
         } as BookingItemData)
       }
+      placementsRef.current = placements
 
       timeline.setGroups(new DataSet(groups))
       timeline.setItems(new DataSet(items))
@@ -308,6 +358,67 @@ export function BedTimeline() {
   useEffect(() => {
     if (!containerRef.current) return
 
+    /** Briefly flash a pill red to signal a rejected move. */
+    const flashItem = (id: string) => {
+      // itemsData exists at runtime but is not part of the public Timeline type
+      const itemsData = () =>
+        (timelineRef.current as unknown as { itemsData: DataSet<DataItem> } | null)?.itemsData
+      itemsData()?.update({ id, className: 'mv-booking mv-rejected' } as DataItem)
+      setTimeout(() => {
+        itemsData()?.update({ id, className: 'mv-booking' } as DataItem)
+      }, 900)
+    }
+
+    /**
+     * Drag-and-drop validation + persistence.
+     * Vertical move = reassign bed, horizontal move = change dates; both validated.
+     * Reject (item snaps back) on: non-bed drop, past dates, maintenance bed,
+     * overlap with another active booking on the target bed. The DB exclusion
+     * constraint is the final guard — a failed UPDATE reverts via refetch.
+     */
+    const onMove = (item: TimelineItem, callback: (item: TimelineItem | null) => void) => {
+      const data = item as unknown as BookingItemData
+      if (data.itemKind !== 'booking') {
+        callback(null)
+        return
+      }
+
+      const bedId = typeof data.group === 'string' ? data.group.replace(/^bed:/, '') : ''
+      const start = startOfDay(asDate(data.start))
+      const end = startOfDay(asDate(data.end))
+
+      const reject = (message: string) => {
+        callback(null) // vis returns the item to its original position
+        flashItem(String(data.id))
+        showNotice(message)
+      }
+
+      const bed = bedsRef.current.find((b) => b.id === bedId)
+      if (!bedId || !bed) return reject('Drop the booking onto a bed row')
+      // Reject dragging a booking's start into the past; an unchanged range
+      // that already spans today (e.g. a checked-in guest) may move beds.
+      const original = placementsRef.current.find((p) => p.id === data.id)
+      if (start.getTime() < todayStart.getTime() && start.getTime() !== original?.start.getTime())
+        return reject("Can't move a booking into the past")
+      if (bed.status === 'maintenance') return reject('Bed is under maintenance')
+
+      const overlap = placementsRef.current.some(
+        (p) => p.id !== data.id && p.bedId === bedId && start < p.end && p.start < end,
+      )
+      if (overlap) return reject('Bed occupied for those dates')
+
+      // Optimistically apply, then persist; on DB failure (e.g. 23P01 race)
+      // revert by refetching from the database.
+      callback(item)
+      void persistMove(String(data.id), bedId, start, end).then((error) => {
+        if (error) {
+          showNotice('Bed occupied for those dates')
+          flashItem(String(data.id))
+          void loadRef.current()
+        }
+      })
+    }
+
     const options: TimelineOptions = {
       start: windowStart,
       end: windowEnd,
@@ -318,6 +429,12 @@ export function BedTimeline() {
       orientation: 'top',
       stack: true,
       showCurrentTime: true,
+      // read-only otherwise: only moving existing bookings is allowed
+      editable: { add: false, remove: false, updateTime: true, updateGroup: true },
+      // drag without a click-to-select first
+      itemsAlwaysDraggable: { item: true },
+      snap: (date: Date) => startOfDay(asDate(date)),
+      onMove,
       // Our item/label HTML is built in-house and user data is escapeHtml'd;
       // vis's default XSS filter would strip the class attributes we style with.
       xss: { disabled: true },
@@ -354,6 +471,22 @@ export function BedTimeline() {
 
     const timeline = new Timeline(containerRef.current, new DataSet(), new DataSet(), options)
     timelineRef.current = timeline
+
+    // vis-timeline 8.x configures the item-drag pan recognizer with
+    // `modifiedHammer.ALL`, a static that @egjs/hammerjs does not have (only
+    // DIRECTION_ALL = 30 exists) — the recognizer's directionTest can never
+    // pass and dragging silently dies. Patch the live recognizer here.
+    const itemSet = (
+      timeline as unknown as {
+        itemSet?: { hammer?: { get(name: string): { set(opts: object): void } } }
+      }
+    ).itemSet
+    itemSet?.hammer?.get('pan')?.set({ direction: 30 }) // Hammer.DIRECTION_ALL
+
+    // dev-only handle for Playwright probes
+    if (import.meta.env.DEV) {
+      ;(window as unknown as { __timeline: Timeline }).__timeline = timeline
+    }
 
     return () => {
       timeline.destroy()
@@ -452,6 +585,7 @@ export function BedTimeline() {
               >
                 Today
               </button>
+              <ActionButton onClick={() => navigate('/new-booking')}>New Booking</ActionButton>
             </>
           }
         />
@@ -468,6 +602,16 @@ export function BedTimeline() {
           <div ref={containerRef} className="mv-timeline" />
         </div>
       </main>
+
+      {/* rejection feedback toast */}
+      {notice && (
+        <div
+          role="alert"
+          className="mv-toast fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-md bg-danger px-4 py-2.5 text-sm font-medium text-white shadow-lg"
+        >
+          {notice}
+        </div>
+      )}
     </div>
   )
 }

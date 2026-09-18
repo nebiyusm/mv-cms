@@ -2,3 +2,8 @@
 node_modules/
 dist/
 supabase/.temp/
+
+server/.env
+
+scraper/.env
+scraper/cookies.*.enc
